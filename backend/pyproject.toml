@@ -1,0 +1,43 @@
+[project]
+name = "flowforge-backend"
+version = "0.1.0"
+description = "FlowForge AI backend — Requirements Intelligence & Engineering Decision Platform"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "httpx2>=0.28",   # starlette TestClient now prefers httpx2
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+# This is an application, not a library: tell uv not to build/install the
+# project itself as a package — just manage its environment.
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/F: pyflakes+pycodestyle · I: import sorting · UP: pyupgrade
+# B: bugbear · SIM: simplify
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Put the backend root on sys.path so `import app...` works without installing
+# the project as a package.
+pythonpath = ["."]
+addopts = "-q"
