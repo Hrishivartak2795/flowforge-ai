@@ -36,14 +36,31 @@ flowforge/
 
 ## Getting started
 
-Local setup instructions arrive with the backend app (M0.2) and Docker (M0.4).
-Right now this repository is an intentionally empty, runnable skeleton.
+### Run the full stack with Docker (recommended)
+
+```bash
+cp .env.example .env          # optional; compose has sane defaults
+docker compose up --build
+```
+
+This starts PostgreSQL 16 (with pgvector) and the FastAPI backend. Then:
+
+- API: http://127.0.0.1:8000
+- Liveness: http://127.0.0.1:8000/health
+- Readiness (checks DB): http://127.0.0.1:8000/health/ready
+- API docs: http://127.0.0.1:8000/docs
+
+Stop with `docker compose down` (add `-v` to also drop the database volume).
+
+### Backend-only local dev (no Docker)
+
+See [`backend/README.md`](backend/README.md) for the `uv`-based workflow.
 
 ## Milestone 0 progress
 
 - [x] 0.1 — Repository skeleton
-- [ ] 0.2 — Backend app + tooling (uv, ruff, mypy, pytest, `/health`)
-- [ ] 0.3 — Config + structured logging
-- [ ] 0.4 — Containerization + DB connectivity (`/health/ready`)
+- [x] 0.2 — Backend app + tooling (uv, ruff, mypy, pytest, `/health`)
+- [x] 0.3 — Config + structured logging
+- [x] 0.4 — Containerization + DB connectivity (`/health/ready`)
 - [ ] 0.5 — CI pipeline (GitHub Actions)
 - [ ] 0.6 — Frontend stub

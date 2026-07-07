@@ -6,6 +6,9 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "psycopg[binary]>=3.2",
 ]
 
 [dependency-groups]
@@ -40,4 +43,4 @@ testpaths = ["tests"]
 # Put the backend root on sys.path so `import app...` works without installing
 # the project as a package.
 pythonpath = ["."]
-addopts = "-q"
+addopts = "-q --tb=short"
