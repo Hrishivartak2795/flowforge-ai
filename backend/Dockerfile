@@ -34,6 +34,11 @@ ENV PATH="/app/.venv/bin:$PATH" \
 # App source last so code changes don't bust the dependency layer.
 COPY --chown=appuser:appuser app ./app
 
+# Migration tooling ships in the image so `alembic upgrade head` works in the
+# container (and in prod/CI) — the schema is created only via these migrations.
+COPY --chown=appuser:appuser alembic.ini ./alembic.ini
+COPY --chown=appuser:appuser migrations ./migrations
+
 USER appuser
 EXPOSE 8000
 
