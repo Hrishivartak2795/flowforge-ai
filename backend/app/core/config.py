@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     max_repo_bytes: int = Field(default=200 * 1024 * 1024)  # 200 MiB uncompressed
     max_files_per_repo: int = Field(default=20_000)
     clone_timeout_seconds: int = Field(default=120)
+    # M2 Step 3 — per-file size cap during discovery. Oversized files are
+    # skipped-and-logged, not fatal; this bounds parser input size independently
+    # of the archive-level `max_repo_bytes` cumulative cap.
+    max_file_bytes: int = Field(default=1_048_576)  # 1 MiB
 
 
 @lru_cache(maxsize=1)
