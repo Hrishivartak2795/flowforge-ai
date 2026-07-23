@@ -62,3 +62,20 @@ class ParseError(IngestionError):
     def __init__(self, message: str, *, path: Path) -> None:
         super().__init__(message)
         self.path = path
+
+
+class AllFilesFailedError(IngestionError):
+    """Every discovered file failed to parse (→ 422).
+
+    Distinct from a per-file :class:`ParseError`, which is skippable: this
+    fires only when a non-empty discovery result yields zero successfully
+    parsed modules, so there is nothing to persist and no ``Project`` row is
+    created.
+    """
+
+    def __init__(self, *, discovered_count: int, skipped_count: int) -> None:
+        super().__init__(
+            f"all {discovered_count} discovered file(s) failed to parse"
+        )
+        self.discovered_count = discovered_count
+        self.skipped_count = skipped_count

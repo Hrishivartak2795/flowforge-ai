@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 
 from app.core.db import get_db_session
 from app.services.ingestion.errors import (
+    AllFilesFailedError,
     ArchiveTooLargeError,
     CloneError,
     CloneTimeoutError,
@@ -84,7 +85,10 @@ class TestIngestZip:
                 "app.api.routes.projects.ingest_zip", new_callable=AsyncMock
             ) as mock_ingest:
                 mock_ingest.return_value = IngestionOutcome(
-                    project_id=project_id, code_unit_count=3, test_unit_count=1
+                    project_id=project_id,
+                    code_unit_count=3,
+                    test_unit_count=1,
+                    skipped_file_count=2,
                 )
                 response = client.post(
                     "/projects/zip",
@@ -100,6 +104,7 @@ class TestIngestZip:
             "id": str(project_id),
             "code_unit_count": 3,
             "test_unit_count": 1,
+            "skipped_file_count": 2,
         }
 
     def test_missing_file_field_returns_422(
@@ -123,7 +128,10 @@ class TestIngestGithub:
                 "app.api.routes.projects.ingest_github", new_callable=AsyncMock
             ) as mock_ingest:
                 mock_ingest.return_value = IngestionOutcome(
-                    project_id=project_id, code_unit_count=5, test_unit_count=2
+                    project_id=project_id,
+                    code_unit_count=5,
+                    test_unit_count=2,
+                    skipped_file_count=0,
                 )
                 response = client.post(
                     "/projects/github", json={"github_url": "https://github.com/o/r"}
@@ -137,6 +145,7 @@ class TestIngestGithub:
             "id": str(project_id),
             "code_unit_count": 5,
             "test_unit_count": 2,
+            "skipped_file_count": 0,
         }
 
     def test_missing_github_url_returns_422(
@@ -221,6 +230,7 @@ class TestErrorMapping:
             (CloneTimeoutError("timed out"), 504),
             (CloneError("clone failed"), 502),
             (ParseError("bad syntax", path=Path(__file__)), 422),
+            (AllFilesFailedError(discovered_count=3, skipped_count=3), 422),
             (IngestionError("unmapped subclass"), 500),
         ],
     )
@@ -245,6 +255,53 @@ class TestErrorMapping:
         assert set(body.keys()) == {"detail"}
         assert isinstance(body["detail"], str)
         assert len(body["detail"]) < 100
+
+    @pytest.mark.parametrize(
+        ("pipeline_function", "request_kwargs"),
+        [
+            (
+                "ingest_zip",
+                {
+                    "method": "post",
+                    "url": "/projects/zip",
+                    "files": {"file": ("repo.zip", b"bytes", "application/zip")},
+                },
+            ),
+            (
+                "ingest_github",
+                {
+                    "method": "post",
+                    "url": "/projects/github",
+                    "json": {"github_url": "https://github.com/o/r"},
+                },
+            ),
+        ],
+    )
+    def test_all_files_failed_error_maps_to_422_on_both_endpoints(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        pipeline_function: str,
+        request_kwargs: dict[str, Any],
+    ) -> None:
+        app.dependency_overrides[get_db_session] = _null_session
+        try:
+            with patch(
+                f"app.api.routes.projects.{pipeline_function}", new_callable=AsyncMock
+            ) as mock_ingest:
+                mock_ingest.side_effect = AllFilesFailedError(
+                    discovered_count=4, skipped_count=4
+                )
+                method = request_kwargs.pop("method")
+                url = request_kwargs.pop("url")
+                response = getattr(client, method)(url, **request_kwargs)
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 422
+        body = response.json()
+        assert set(body.keys()) == {"detail"}
+        assert isinstance(body["detail"], str)
 
     def test_sqlalchemy_error_maps_to_500(
         self, app: FastAPI, client: TestClient

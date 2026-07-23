@@ -7,12 +7,17 @@ tests can override cleanly and misconfiguration fails fast.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _default_parse_workers() -> int:
+    return min(4, os.cpu_count() or 1)
 
 
 class Settings(BaseSettings):
@@ -55,6 +60,8 @@ class Settings(BaseSettings):
     # skipped-and-logged, not fatal; this bounds parser input size independently
     # of the archive-level `max_repo_bytes` cumulative cap.
     max_file_bytes: int = Field(default=1_048_576)  # 1 MiB
+    # M2 Step 8 — bounded process-pool size for concurrent per-file AST parsing.
+    ingestion_parse_workers: int = Field(default_factory=_default_parse_workers, ge=1)
 
 
 @lru_cache(maxsize=1)

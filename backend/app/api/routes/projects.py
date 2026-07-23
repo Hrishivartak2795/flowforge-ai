@@ -26,6 +26,7 @@ from app.core.config import Settings, get_settings
 from app.core.db import get_db_session
 from app.domain.models import CodeUnit, Project, TestUnit
 from app.services.ingestion.errors import (
+    AllFilesFailedError,
     ArchiveTooLargeError,
     CloneError,
     CloneTimeoutError,
@@ -58,6 +59,7 @@ class IngestResponse(BaseModel):
     id: UUID
     code_unit_count: int
     test_unit_count: int
+    skipped_file_count: int
 
 
 class ProjectDetailResponse(BaseModel):
@@ -88,6 +90,11 @@ _ERROR_DETAIL: tuple[tuple[type[IngestionError], int, str], ...] = (
     (CloneTimeoutError, status.HTTP_504_GATEWAY_TIMEOUT, "repository clone timed out"),
     (CloneError, status.HTTP_502_BAD_GATEWAY, "repository clone failed"),
     (ParseError, status.HTTP_422_UNPROCESSABLE_CONTENT, "failed to parse repository source"),
+    (
+        AllFilesFailedError,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        "all discovered files failed to parse",
+    ),
 )
 
 _DEFAULT_DETAIL = "ingestion failed"
@@ -131,6 +138,7 @@ async def ingest_zip_project(
         id=outcome.project_id,
         code_unit_count=outcome.code_unit_count,
         test_unit_count=outcome.test_unit_count,
+        skipped_file_count=outcome.skipped_file_count,
     )
 
 
@@ -159,6 +167,7 @@ async def ingest_github_project(
         id=outcome.project_id,
         code_unit_count=outcome.code_unit_count,
         test_unit_count=outcome.test_unit_count,
+        skipped_file_count=outcome.skipped_file_count,
     )
 
 
