@@ -7,6 +7,8 @@ for logs; the HTTP layer decides whether to expose it verbatim.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 
 class IngestionError(Exception):
     """Base class for anything the ingestion layer refuses."""
@@ -45,3 +47,18 @@ class CloneError(IngestionError):
 
 class CloneTimeoutError(CloneError):
     """A clone exceeded the configured timeout (→ 504)."""
+
+
+class ParseError(IngestionError):
+    """AST parsing of one Python source file failed.
+
+    Wraps read failures (``OSError``, ``UnicodeDecodeError``), syntax errors
+    from ``ast.parse``, and the unexpected-``None`` case from
+    ``ast.get_source_segment``. ``path`` identifies the offending file so
+    orchestration (Step 8) can skip-and-log without re-deriving it from the
+    exception message.
+    """
+
+    def __init__(self, message: str, *, path: Path) -> None:
+        super().__init__(message)
+        self.path = path
