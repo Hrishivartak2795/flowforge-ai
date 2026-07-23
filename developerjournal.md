@@ -2,7 +2,7 @@
 
 > **What this is.** Your personal, revision-oriented reference for FlowForge AI. Read top-to-bottom in ~15 minutes to fully swap the project's current state back into your head. **Update after every milestone; don't rewrite.** Each section is short on purpose — depth lives in `docs/ADR.md` and `docs/SystemDesign.md`.
 >
-> **Last updated:** end of Milestone 1 (Database Schema & Migrations) · **Owner:** you.
+> **Last updated:** M2 (Repository Intelligence Engine) design frozen — implementation not started · **Owner:** you.
 
 ---
 
@@ -106,6 +106,20 @@ flowchart LR
 - **Embeddings prepared, not implemented.** `code_unit.dense_embedding` is `vector(1024)` (BGE-M3) with an HNSW cosine index, and `lexical_index` is `tsvector` with a GIN index — both created and left empty. M4 fills them; nothing embeds yet.
 - **Learned.** SQLAlchemy 2.x typed models (`Mapped`/`mapped_column`), DB-side defaults (`gen_random_uuid()`, `now()`), `ON DELETE CASCADE` + `passive_deletes`, enums as VARCHAR+CHECK via `values_callable` (store the lowercase *value*, not the member name — a real gotcha caught in verification), pgvector's `Vector` type + HNSW/GIN index declarations, async Alembic, and moving extensions into migrations.
 - **Verified.** `alembic upgrade head` on a clean pgvector Postgres creates all 8 tables + both extensions; FK/index/CHECK inventory matches the design; DB-side defaults, the enum CHECKs, the XOR CHECK, and cascade delete all behave correctly under live inserts; a second autogenerate reports **no drift**; downgrade→upgrade round-trips; ruff + mypy(strict) + pytest all green (14 tests).
+
+### M2 — Repository Intelligence Engine *(design frozen; not implemented)*
+- **Objective (design phase).** Ahead of coding M2, produce a Staff-Engineer-quality architecture doc for the *deterministic* repository parser — clone/unzip a Python repo, discover files, parse with `ast`, extract per-file/class/function metadata, and persist `code_unit` + `test_unit` rows. **No AI, no embeddings, no Claude** — pure representation, matching the ADR-008 boundary.
+- **Design decisions (locked before implementation).**
+  - **Inputs:** GitHub URL (shallow clone via GitPython) *or* an uploaded ZIP; validation by size, file count, and extraction depth. Both funnel to a common "checkout directory" abstraction so the parser doesn't care where files came from.
+  - **Discovery:** walk with a hard ignore list (`.git`, `.venv`, `venv`, `node_modules`, `__pycache__`, `dist`, `build`, `.tox`, `.mypy_cache`, `.ruff_cache`, `.pytest_cache`), only `.py` files, size cap per file. Symlinks not followed (zip-slip / traversal defense).
+  - **AST parsing:** `ast.parse` never executes code — safe on untrusted input. Nodes we care about: `Module`, `ClassDef`, `FunctionDef`, `AsyncFunctionDef`, `Import`, `ImportFrom`, decorators, args, return annotations, docstrings via `ast.get_docstring`.
+  - **CodeUnit vs TestUnit split:** test detection is deterministic and file-first — anything under a `tests/` directory or matching `test_*.py` / `*_test.py`. Everything else is a `CodeUnit`. A file that hosts both (rare in real projects) is treated by its path, not per-function heuristics.
+  - **Metadata captured now:** qualified name, signature, decorators, base classes, docstring, `async` flag, line span, source snippet, and `content_hash` (stable input to M4's embedding cache). Import edges captured per file as JSONB on a per-`CodeUnit` payload — the *import graph* is a derived read, not a new table (avoids schema churn).
+  - **Persistence:** writes go only into `project`, `code_unit`, `test_unit` — nothing else. `dense_embedding` / `lexical_index` stay null (M4). No `analysis_run`, `trace_link`, or `trace_evidence` writes yet.
+  - **Concurrency:** parsing is CPU-bound Python; per-file parsing uses a small process pool. Per-file failures are logged and skipped, not fatal (partial success is the default).
+  - **Future extensibility:** the parser is a `LanguageParser` protocol with a Python implementation now; Java/JS/Go later means dropping in new implementations, no schema change (all language-agnostic fields already live on `code_unit`).
+- **Deliverables when built:** ingestion service + repo parser + a `POST /projects` endpoint that returns the created project id, plus a status check. No Claude, no embeddings, no matrix.
+- **Why freeze this before coding:** M2 is the first milestone where design surface exceeds one screen, and it's the boundary where "deterministic representation" ends. Getting the ignore list, the test/code split, the ZIP safety story, and the concurrency model right on paper avoids rewrites once fixtures + tests accumulate.
 
 ### Things you should remember
 - **Through M1:** Dockerized FastAPI + Postgres/pgvector with `/health` + `/health/ready`, CI enforcing the gates, a Next.js skeleton, and now the **full 8-table persistence layer under Alembic**.
@@ -473,25 +487,32 @@ Key evolutions to expect:
 
 ## 9. What Comes Next
 
-**Milestone 1 is complete.** Next milestone: **M2 / M3 — Ingestion & Parsing** (upload a requirements doc; parse a Python repo into `CodeUnit` / `TestUnit` rows).
+**Milestone 1 is complete. M2's design is frozen** (see §3 M2 entry). Next: **implement M2 — Repository Intelligence Engine** one step at a time.
 
-**Why now.** The schema exists and is migration-managed, so the next step is to *fill* it. Ingestion writes the first real rows: a `requirements_doc` + `project`, and — via Python's `ast` — `code_unit` / `test_unit` records for a target repository. Still no AI: parsing and persistence are deterministic (ADR-008 boundary).
+**Why now.** The schema exists and is migration-managed; the M2 design is settled. Implementation writes the first real rows via `ast` — deterministic and self-contained, no AI on the critical path yet (ADR-008 boundary).
 
-**How it builds on M1.** Every insert goes through the M0.4 `get_db_session` dependency into the M1 tables. `code_unit` rows are written with `content_hash` set but `dense_embedding` / `lexical_index` left null — M4 backfills those. The `project → code_unit` / `test_unit` FKs and cascades are already in place, so a re-parse or project delete is clean.
+**What implementation looks like.** The design breaks cleanly into small, independently-testable steps:
+1. Ingestion I/O — ZIP extractor and GitHub cloner (both landing in a "checkout dir"), with the size/depth guards.
+2. File discovery — the ignore-list walker over the checkout dir; unit-tested against a fixture repo.
+3. AST parser — turns one `.py` file into a typed intermediate representation (functions, classes, imports, docstrings, decorators, line spans, `content_hash`); no DB yet.
+4. Extractors — pure functions that map the parser's IR onto `CodeUnit` / `TestUnit` domain objects.
+5. Persistence — the service that transactionally writes a `project`, its `code_unit`s, and its `test_unit`s, using the M0.4 session dependency.
+6. HTTP surface — `POST /projects` (URL or ZIP upload) and `GET /projects/{id}` returning parsed counts. Full round-trip.
+7. Concurrency + robustness — process pool for parsing, per-file failure isolation, structured error logging.
 
-**Files introduced (planned):** `app/services/` (ingestion + parsing services), an `app/adapters/`/parser module using `ast`, `app/domain/schemas.py` (Pydantic DTOs for upload/parse results), and the first resource routes (`app/api/routes/projects.py`). CI likely gains a **Postgres service container** now that there's DB behavior worth testing against a real database (the M1 migration itself is the first thing that job would run).
+**Files introduced (planned):** `app/services/ingestion.py`, `app/services/repository_parser/` (walker, ast parser, extractors, language-parser protocol), `app/domain/schemas.py` (Pydantic DTOs for upload/parse results), and the first resource route (`app/api/routes/projects.py`). CI likely gains a **Postgres service container** now that there's DB behavior worth testing against a real database (the M1 migration itself is the first thing that job would run).
 
 ### How M1 prepares us for parsing and requirement extraction
 M1 is the table every downstream stage writes into:
-- **Repository parsing (M3):** `ast` turns each function/method/class into a `CodeUnit` and each test into a `TestUnit` — rows that already have a home, provenance (`project_id`, `file_path`, line spans), and a `content_hash` slot for embedding-cache logic later.
-- **Requirement extraction (M5):** the batched Claude analysis call produces atomic `Requirement` rows with `external_key`, ambiguity flags, and the whole Stage 1–3 payload dropped into the `requirement_analysis` JSONB — the column is already there, typed and indexed by `(project_id, external_key)`.
+- **Repository parsing (M2, deterministic):** `ast` turns each function/method/class into a `CodeUnit` and each test into a `TestUnit` — rows that already have a home, provenance (`project_id`, `file_path`, line spans), and a `content_hash` slot for embedding-cache logic later.
+- **Requirement extraction (M3+, Claude):** the batched Claude analysis call produces atomic `Requirement` rows with `external_key`, ambiguity flags, and the whole Stage 1–3 payload dropped into the `requirement_analysis` JSONB — the column is already there, typed and indexed by `(project_id, external_key)`.
 - **Embeddings + retrieval (M4):** the `vector(1024)` + `tsvector` columns and their HNSW/GIN indexes exist and are empty; the embedder just fills them and hybrid search queries them — no schema change.
 - **Traceability + evidence (M6–M7):** each run inserts `trace_link` rows (one per requirement) citing `trace_evidence` rows — the versioning anchor and the multi-unit evidence join are already modeled.
 
 In short: **from here on, milestones write rows, not schema.** The session dependency, the DI pattern, the JSON logger, the pgvector container, CI, and now the 8-table schema are the hooks the AI pipeline hangs on.
 
 ### Things you should remember
-- M1 done → **M2/M3 is ingestion + `ast` parsing** filling `requirements_doc`, `code_unit`, `test_unit` (deterministic, no AI yet).
+- M1 done, **M2 design frozen** → next is **implementing M2 step-by-step** (deterministic `ast` parsing, no AI).
 - The AI pipeline reuses existing seams: **DB session, DI, JSON logger, pgvector, CI, and the M1 tables** — no re-architecture.
 - **Schema evolves only through new Alembic migrations**; the initial one is immutable.
 - `app/core/` is cross-cutting infra; `app/domain/` is the dependency-free model layer; services/adapters come next.

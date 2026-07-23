@@ -1,0 +1,47 @@
+"""Exceptions raised by the ingestion layer.
+
+Kept small and intent-shaped so the HTTP layer can map each to a specific status
+code without inspecting messages. All errors carry a human-readable ``reason``
+for logs; the HTTP layer decides whether to expose it verbatim.
+"""
+
+from __future__ import annotations
+
+
+class IngestionError(Exception):
+    """Base class for anything the ingestion layer refuses."""
+
+
+class InvalidArchiveError(IngestionError):
+    """The archive is malformed or not a supported format (→ 400)."""
+
+
+class UnsafeArchiveError(IngestionError):
+    """Traversal attempt, symlink, or otherwise unsafe entry (→ 400).
+
+    Distinct from :class:`InvalidArchiveError` because it signals *intent* to
+    escape the checkout directory, not just corruption. Never expose the
+    ``reason`` field verbatim to end users.
+    """
+
+
+class ArchiveTooLargeError(IngestionError):
+    """Uncompressed size or entry count exceeds the configured cap (→ 413)."""
+
+
+class InvalidRepositoryURLError(IngestionError):
+    """The repository URL is malformed, uses an unsupported scheme, targets a
+    disallowed host, or embeds credentials (→ 400)."""
+
+
+class CloneError(IngestionError):
+    """The clone operation itself failed (→ 502 / 504 depending on cause).
+
+    Wraps network failures, non-existent repos, private repos (auth required),
+    and timeouts into a single type. The ``reason`` field carries the original
+    message for logs; the HTTP layer maps the subclass to the right status code.
+    """
+
+
+class CloneTimeoutError(CloneError):
+    """A clone exceeded the configured timeout (→ 504)."""

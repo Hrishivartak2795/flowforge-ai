@@ -11,6 +11,7 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "alembic>=1.14",
     "pgvector>=0.3.6",
+    "gitpython>=3.1",
 ]
 
 [dependency-groups]
@@ -47,4 +48,7 @@ testpaths = ["tests"]
 # Put the backend root on sys.path so `import app...` works without installing
 # the project as a package.
 pythonpath = ["."]
-addopts = "-q --tb=short"
+addopts = "-q --tb=short -m 'not network'"
+markers = [
+    "network: requires real internet access (deselected by default; run with '-m network --run-network')",
+]
